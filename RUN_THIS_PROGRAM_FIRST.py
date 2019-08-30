@@ -1,8 +1,6 @@
 ##BoxOffice Predictor 0.1.0 Copyright 2019
 ##Created by:
-##    Jian (Sam) Zhou         Andrew Chasin
-##    Peter Cougan            John Lauer
-##    Jacquelyn Brozyna
+##    Jian (Sam) Zhou
 ##Project misuse witout authorization is prohibitted.
 
 import twitter_sentiment_analyzerz
