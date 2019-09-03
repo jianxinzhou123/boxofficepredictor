@@ -22,4 +22,4 @@ Step 2 [IMPORTANT]
 
 Step 3
     By now you should be good to go.
-    Navigate to the “run.py” file and see how sentiment analysis works with the NTLK API!
+    Navigate to the “RUN_THIS_PROGRAM_FIRST.py” file and see how sentiment analysis works with the NTLK API!
