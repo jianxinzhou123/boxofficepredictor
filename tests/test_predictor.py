@@ -50,6 +50,27 @@ class PredictorTests(unittest.TestCase):
         self.assertGreater(result.estimated_box_office, 0.0)
         self.assertEqual(result.title, "Example Movie")
 
+    def test_feature_vector_prioritizes_youtube_ratio_over_twitter(self) -> None:
+        service = BoxOfficePredictorService.from_csv(TRAINING_DATA_PATH)
+        request = PredictionRequest(
+            title="Priority Check",
+            budget=120000000,
+            twitter_score=0.4,
+            youtube_ratio=0.9,
+            youtube_like_count=500000,
+        )
+
+        features = service._feature_vector(request)
+        self.assertEqual(
+            features[2],
+            request.youtube_ratio * BoxOfficePredictorService.YOUTUBE_RATIO_WEIGHT,
+        )
+        self.assertEqual(
+            features[4],
+            request.twitter_score * BoxOfficePredictorService.TWITTER_SCORE_WEIGHT,
+        )
+        self.assertLess(features[4], features[2])
+
 
 class DataLayoutTests(unittest.TestCase):
     def test_default_training_data_exists(self) -> None:
@@ -83,6 +104,32 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(payload["title"], "Example Movie")
             self.assertTrue(output_path.exists())
+
+    def test_predict_computes_youtube_ratio_and_defaults_twitter_score(self) -> None:
+        buffer = StringIO()
+        with redirect_stdout(buffer):
+            exit_code = cli_main(
+                [
+                    "predict",
+                    "--title",
+                    "Example Movie",
+                    "--budget",
+                    "120000000",
+                    "--youtube-like-count",
+                    "900",
+                    "--youtube-dislike-count",
+                    "100",
+                    "--write-predict-csv",
+                    "",
+                    "--json",
+                ]
+            )
+
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["twitter_score"], 0.0)
+        self.assertAlmostEqual(payload["youtube_ratio"], 0.9, places=6)
+        self.assertEqual(payload["youtube_like_count"], 900.0)
 
     def test_prepare_data_subcommand_deduplicates_rows(self) -> None:
         with TemporaryDirectory() as directory:
@@ -126,8 +173,10 @@ class CliTests(unittest.TestCase):
                         "120000000",
                         "--revenue",
                         "450000000",
-                        "--twitter-score",
-                        "0.35",
+                        "--youtube-like-count",
+                        "900",
+                        "--youtube-dislike-count",
+                        "100",
                         "--output",
                         str(dataset_path),
                     ]
@@ -137,6 +186,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["Movie Name"], "Example Movie")
+            self.assertEqual(rows[0]["TwitterSense True Score"], "0.0")
+            self.assertEqual(rows[0]["Youtube Trailer Like Count"], "900.0")
+            self.assertAlmostEqual(float(rows[0]["Youtube Ratio Score"]), 0.9, places=6)
 
 
 if __name__ == "__main__":

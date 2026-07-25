@@ -9,6 +9,10 @@ from .regression import RidgeRegressor
 
 
 class BoxOfficePredictorService:
+    # Favor YouTube engagement ratio as the primary social signal.
+    YOUTUBE_RATIO_WEIGHT = 1.0
+    TWITTER_SCORE_WEIGHT = 0.35
+
     def __init__(self, records: list[TrainingRecord], *, regularization: float = 2.0) -> None:
         self.records = records
         self.defaults = training_defaults(records)
@@ -33,9 +37,9 @@ class BoxOfficePredictorService:
         return [
             1.0,
             math.log1p(max(0.0, request.budget)),
-            request.twitter_score,
-            youtube_ratio,
+            youtube_ratio * self.YOUTUBE_RATIO_WEIGHT,
             math.log1p(max(0.0, youtube_like_count)),
+            request.twitter_score * self.TWITTER_SCORE_WEIGHT,
         ]
 
     def _fit(self) -> None:

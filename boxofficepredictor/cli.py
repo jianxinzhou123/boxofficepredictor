@@ -18,20 +18,21 @@ from .twitter import FileTweetProvider, StaticTweetProvider, TwitterRecentSearch
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Predict a movie's box office from budget and Twitter sentiment."
+        description="Predict a movie's box office from budget, YouTube engagement, and optional Twitter sentiment."
     )
     subparsers = parser.add_subparsers(dest="command")
 
     predict_parser = subparsers.add_parser("predict", help="Run a box office prediction")
     predict_parser.add_argument("--title", help="Movie title")
     predict_parser.add_argument("--budget", type=float, help="Estimated production budget in USD")
-    predict_parser.add_argument("--twitter-score", type=float, help="Precomputed Twitter sentiment score in the -1..1 range")
+    predict_parser.add_argument("--youtube-like-count", type=float, help="YouTube like count")
+    predict_parser.add_argument("--youtube-dislike-count", type=float, help="YouTube dislike count")
+    predict_parser.add_argument("--youtube-ratio", type=float, help="Optional explicit YouTube like ratio (overrides computed ratio)")
+    predict_parser.add_argument("--twitter-score", type=float, help="Optional precomputed Twitter sentiment score in the -1..1 range")
     predict_parser.add_argument("--topic", help="Hashtag or search topic for live Twitter collection")
     predict_parser.add_argument("--tweet", action="append", default=[], help="Inline tweet text; repeat to provide more than one")
     predict_parser.add_argument("--tweets-file", help="Path to a .txt or .csv file containing tweets")
     predict_parser.add_argument("--tweet-limit", type=int, default=100, help="Maximum number of tweets to analyze")
-    predict_parser.add_argument("--youtube-ratio", type=float, help="Optional YouTube like ratio")
-    predict_parser.add_argument("--youtube-like-count", type=float, help="Optional YouTube like count")
     predict_parser.add_argument("--training-data", default=str(TRAINING_DATA_PATH))
     predict_parser.add_argument("--write-predict-csv", default=str(PREDICTION_INPUT_PATH), help="Write the normalized input row to a CSV file")
     predict_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output")
@@ -61,7 +62,29 @@ def _prompt_float(label: str) -> float:
             print("Enter a numeric value.")
 
 
-def _resolve_twitter_score(args: argparse.Namespace) -> tuple[float, dict[str, object] | None]:
+def _prompt_optional_float(label: str) -> float | None:
+    while True:
+        value = input(f"{label}: ").strip()
+        if not value:
+            return None
+        try:
+            return float(value)
+        except ValueError:
+            print("Enter a numeric value, or press Enter to skip.")
+
+
+def _compute_youtube_ratio(like_count: float, dislike_count: float) -> float:
+    denominator = max(0.0, like_count) + max(0.0, dislike_count)
+    if denominator <= 0.0:
+        return 0.0
+    return max(0.0, like_count) / denominator
+
+
+def _resolve_twitter_score(
+    args: argparse.Namespace,
+    *,
+    prompt_if_missing: bool,
+) -> tuple[float, dict[str, object] | None]:
     if args.twitter_score is not None:
         return args.twitter_score, None
 
@@ -75,8 +98,11 @@ def _resolve_twitter_score(args: argparse.Namespace) -> tuple[float, dict[str, o
         provider = TwitterRecentSearchProvider.from_env()
         tweets = provider.fetch_tweets(args.topic, args.tweet_limit)
     else:
-        score = _prompt_float("Twitter sentiment score (-1 to 1), or Ctrl+C to exit")
-        return score, None
+        if not prompt_if_missing:
+            return 0.0, None
+        # Keep Twitter input optional in interactive mode.
+        score = _prompt_optional_float("Optional Twitter sentiment score (-1 to 1), press Enter to skip")
+        return (score if score is not None else 0.0), None
 
     report = analyze_tweets(tweets)
     return report.score, {
@@ -87,11 +113,26 @@ def _resolve_twitter_score(args: argparse.Namespace) -> tuple[float, dict[str, o
     }
 
 
-def _ensure_inputs(args: argparse.Namespace) -> None:
+def _ensure_inputs(args: argparse.Namespace) -> bool:
+    prompted_any = False
     if not args.title:
         args.title = _prompt_text("Movie title")
+        prompted_any = True
     if args.budget is None:
         args.budget = _prompt_float("Estimated production budget in USD")
+        prompted_any = True
+
+    if args.youtube_like_count is None and args.youtube_ratio is None:
+        args.youtube_like_count = _prompt_float("YouTube like count")
+        prompted_any = True
+    if args.youtube_dislike_count is None and args.youtube_ratio is None:
+        args.youtube_dislike_count = _prompt_float("YouTube dislike count")
+        prompted_any = True
+
+    if args.youtube_ratio is None and args.youtube_like_count is not None and args.youtube_dislike_count is not None:
+        args.youtube_ratio = _compute_youtube_ratio(args.youtube_like_count, args.youtube_dislike_count)
+
+    return prompted_any
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -112,9 +153,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Prepared {count} unique rows in {args.output}")
         return 0
 
-    _ensure_inputs(args)
+    prompted_any = _ensure_inputs(args)
 
-    twitter_score, sentiment_metadata = _resolve_twitter_score(args)
+    twitter_score, sentiment_metadata = _resolve_twitter_score(args, prompt_if_missing=prompted_any)
     request = PredictionRequest(
         title=args.title,
         budget=args.budget,
