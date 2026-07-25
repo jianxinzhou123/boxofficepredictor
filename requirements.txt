@@ -8,4 +8,4 @@ pandas==0.24.1
 Keras==2.2.4
 Pillow==6.0.0
 google_api_python_client==1.7.8
-scikit_learn==0.20.3
+scikit_learn==1.5.0
